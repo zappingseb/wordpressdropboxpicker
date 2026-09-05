@@ -84,7 +84,8 @@ wp-admin -> **Dropbox Picker**
 2. The plugin runs a Dropbox **search** (`after:` / `before:` operators, image category,
    restricted to the folder), so Dropbox does the date filtering. The exact range is then
    applied in the blog's timezone on the file's Dropbox time. Non-image files are counted
-   and skipped. Dropbox's search index lags a little for files uploaded seconds ago.
+   and skipped. Dropbox's search index lags behind for recently uploaded files, so when the
+   search returns nothing at all the plugin lists the folder directly instead.
 3. Choose 2-10 columns, select pictures (Shift+click for ranges), enter a gallery name. The
    folder is the German-aware slug of the name, e.g. `wp-content/gallery/hot-8-brass-band-live`.
    Typing also searches the **existing** NextGEN galleries; pick one from the suggestions and it

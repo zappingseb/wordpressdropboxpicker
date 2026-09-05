@@ -201,33 +201,48 @@
     el.grid.innerHTML = ''; el.gridbar.hidden = true; el.result.hidden = true;
     renderSelected();
     el.load.disabled = true;
-    var scanned = 0, matches = [], skipped = {}, pages = 0;
-    setStatus('info', 'Scanning <code>' + escapeHtml(folder || '/') + '</code>' + (recursive === '1' ? ' and subfolders' : '') + ' &hellip;', true);
+    var scanned = 0, matches = [], skipped = {}, pages = 0, mode = 'search';
+    setStatus('info', 'Searching <code>' + escapeHtml(folder || '/') + '</code>' + (recursive === '1' ? ' and subfolders' : '') + ' &hellip;', true);
 
     function page(cursor) {
-      return ajax('scan', { path: folder, cursor: cursor || '', recursive: recursive, from: from, to: to }).then(function (data) {
+      return ajax('scan', { path: folder, cursor: cursor || '', recursive: recursive, from: from, to: to, mode: mode }).then(function (data) {
         pages++;
         scanned += data.scanned;
         matches = matches.concat(data.entries);
         Object.keys(data.skipped || {}).forEach(function (ext) { skipped[ext] = (skipped[ext] || 0) + data.skipped[ext]; });
-        setStatus('info', 'Dropbox search <code>' + escapeHtml(data.query || '') + '</code>: ' + scanned + ' candidates, ' + matches.length + ' photos match ' + from + ' &ndash; ' + to + ' (page ' + pages + ')&hellip;', true);
+        if (mode === 'list') {
+          setStatus('info', 'Listing the folder: ' + scanned + ' files seen, ' + matches.length + ' photos match ' + from + ' &ndash; ' + to + ' (page ' + pages + ')&hellip;', true);
+        } else {
+          setStatus('info', 'Dropbox search <code>' + escapeHtml(data.query || '') + '</code>: ' + scanned + ' candidates, ' + matches.length + ' photos match ' + from + ' &ndash; ' + to + ' (page ' + pages + ')&hellip;', true);
+        }
         if (data.has_more && data.cursor) { return page(data.cursor); }
       });
     }
 
     page('').then(function () {
+      // Dropbox's search index lags behind for files uploaded recently and can
+      // miss small folders entirely; when it returns nothing at all, walk the
+      // folder directly instead (exact, but slow for huge folders).
+      if (!matches.length && !scanned && mode === 'search') {
+        mode = 'list';
+        pages = 0;
+        setStatus('info', 'Dropbox search found nothing (its index lags for new files) &ndash; listing <code>' + escapeHtml(folder || '/') + '</code> directly&hellip;', true);
+        return page('');
+      }
+    }).then(function () {
       matches.sort(function (a, b) { return a.taken_ts - b.taken_ts || a.name.localeCompare(b.name); });
       state.files = matches;
       matches.forEach(function (file) { state.byPath[file.path_lower] = file; });
       var skippedNote = Object.keys(skipped).length ? ' Skipped non-image files: ' + Object.keys(skipped).sort().map(function (ext) { return ext + ' &times;' + skipped[ext]; }).join(', ') + '.' : '';
+      var how = mode === 'list' ? ' (folder listed directly, ' + scanned + ' files)' : ' (' + scanned + ' search candidates)';
       if (!matches.length) {
-        setStatus('ok', 'Scanned ' + scanned + ' files; no photos between ' + from + ' and ' + to + '.' + skippedNote, false);
+        setStatus('ok', 'No photos between ' + from + ' and ' + to + how + '.' + skippedNote, false);
         el.load.disabled = false;
         return;
       }
       var exif = matches.filter(function (f) { return f.taken_source === 'exif'; }).length;
       var dateNote = exif ? ' (' + exif + ' dated by EXIF, ' + (matches.length - exif) + ' by file time)' : ' (dated by Dropbox file time)';
-      setStatus('ok', matches.length + ' photo' + (matches.length === 1 ? '' : 's') + ' between ' + from + ' and ' + to + dateNote + ', ' + scanned + ' search candidates.' + skippedNote, false);
+      setStatus('ok', matches.length + ' photo' + (matches.length === 1 ? '' : 's') + ' between ' + from + ' and ' + to + dateNote + how + '.' + skippedNote, false);
       renderGrid();
       loadThumbs(matches.map(function (f) { return f.path_lower; }));
       el.load.disabled = false;

@@ -681,18 +681,28 @@ final class SEW_Dropbox_NGG_Picker {
         $start_ts = $start->getTimestamp();
         $end_ts   = $end->getTimestamp();
 
+        $mode = $this->post('mode') === 'list' ? 'list' : 'search';
         try {
             $client = $this->client();
             $path = $path === '/' ? '' : $path;
-            // Let Dropbox filter by date: "after:" / "before:" are exclusive day
-            // boundaries in Dropbox's search syntax, so widen by one day on each
-            // side and apply the exact range (in the blog's timezone) below.
-            $query = 'after:' . $start->modify('-1 day')->format('Y-m-d') . ' before:' . $end->modify('+1 day')->format('Y-m-d');
-            $page = $client->search($query, $path, $cursor);
+            $query = '';
             $entries = array();
-            foreach ((array) $page['matches'] as $match) {
-                if (isset($match['metadata']['metadata'])) {
-                    $entries[] = $match['metadata']['metadata'];
+            if ($mode === 'list') {
+                // Fallback when the search index has nothing (it lags behind for
+                // files uploaded recently): walk the folder itself. Slow for huge
+                // folders, exact and complete, and it carries EXIF media info.
+                $page = $client->list_folder($path, $recursive, $cursor);
+                $entries = (array) $page['entries'];
+            } else {
+                // Let Dropbox filter by date: "after:" / "before:" are exclusive day
+                // boundaries in Dropbox's search syntax, so widen by one day on each
+                // side and apply the exact range (in the blog's timezone) below.
+                $query = 'after:' . $start->modify('-1 day')->format('Y-m-d') . ' before:' . $end->modify('+1 day')->format('Y-m-d');
+                $page = $client->search($query, $path, $cursor);
+                foreach ((array) $page['matches'] as $match) {
+                    if (isset($match['metadata']['metadata'])) {
+                        $entries[] = $match['metadata']['metadata'];
+                    }
                 }
             }
             $matches = array();
@@ -704,7 +714,7 @@ final class SEW_Dropbox_NGG_Picker {
                     continue;
                 }
                 // Search is always recursive; honour the checkbox ourselves.
-                if (!$recursive && strtolower(dirname($entry['path_lower'])) !== ($folder_lower === '' ? '/' : $folder_lower)) {
+                if ($mode === 'search' && !$recursive && strtolower(dirname($entry['path_lower'])) !== ($folder_lower === '' ? '/' : $folder_lower)) {
                     continue;
                 }
                 $scanned++;
@@ -742,6 +752,7 @@ final class SEW_Dropbox_NGG_Picker {
                 'scanned'  => $scanned,
                 'skipped'  => $skipped,
                 'query'    => $query,
+                'mode'     => $mode,
                 'cursor'   => !empty($page['has_more']) && !empty($page['cursor']) ? $page['cursor'] : '',
                 'has_more' => !empty($page['has_more']) && !empty($page['cursor']),
             ));
