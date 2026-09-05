@@ -1,0 +1,6 @@
+.env
+.remote-backup/
+deploy/.remote-backup/
+__pycache__/
+plugin/sew-dropbox-ngg-picker/sew-dnp-config.php
+.DS_Store
