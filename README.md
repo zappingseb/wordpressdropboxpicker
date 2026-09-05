@@ -87,6 +87,11 @@ wp-admin -> **Dropbox Picker**
    and skipped. Dropbox's search index lags a little for files uploaded seconds ago.
 3. Choose 2-10 columns, select pictures (Shift+click for ranges), enter a gallery name. The
    folder is the German-aware slug of the name, e.g. `wp-content/gallery/hot-8-brass-band-live`.
+   Typing also searches the **existing** NextGEN galleries; pick one from the suggestions and it
+   becomes a tag with the notice "You will add pictures to an existing gallery, not create a new
+   one". The button then reads *Add to NGG gallery*, new files continue the numbering of the
+   folder and only the added pictures get thumbnails. The tag's × switches back to creating a
+   new gallery.
 4. *Create NGG gallery* -> confirm. The import runs image by image, two in parallel:
    download original, rotate by EXIF, resize to <= 2048 px, lower JPEG quality until
    <= 500 KB, strip EXIF (no GPS on the blog). Files are named `NNN-<original>.jpg` so the

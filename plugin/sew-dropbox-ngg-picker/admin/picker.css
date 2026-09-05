@@ -139,5 +139,31 @@
 .sew-dnp-diag th { width: 220px; }
 .sew-dnp-report { background: #1d2327; color: #e6e6e6; padding: 12px; border-radius: 4px; max-width: 900px; white-space: pre-wrap; font-size: 12px; }
 
+/* gallery name combobox: suggestions + chosen-gallery chip */
+.sew-dnp-combo { position: relative; }
+.sew-dnp-suggest {
+  position: absolute; z-index: 60; left: 0; right: 0; top: 100%; margin: 2px 0 0; padding: 0; list-style: none;
+  background: #fff; border: 1px solid #8c8f94; border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.18); max-height: 280px; overflow: auto;
+}
+.sew-dnp-suggest li { margin: 0; }
+.sew-dnp-suggest-head { padding: 6px 10px; font-size: 11px; color: #646970; border-bottom: 1px solid #dcdcde; background: #f6f7f7; }
+.sew-dnp-suggest button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 10px; cursor: pointer; color: #1d2327; }
+.sew-dnp-suggest button:hover, .sew-dnp-suggest button:focus { background: #f0f6fc; outline: none; }
+.sew-dnp-suggest-title { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sew-dnp-suggest-meta { display: block; font-size: 11px; color: #646970; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sew-dnp-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 6px 4px 8px;
+  background: #e7f0f9; border: 1px solid #2271b1; border-radius: 16px; color: #0a4b78; font-size: 13px; font-weight: 600;
+}
+.sew-dnp-chip .dashicons { font-size: 16px; width: 16px; height: 16px; }
+.sew-dnp-chip-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sew-dnp-chip-remove { background: none; border: 0; color: #0a4b78; cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; border-radius: 50%; }
+.sew-dnp-chip-remove:hover { background: #2271b1; color: #fff; }
+.sew-dnp-notice {
+  display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; margin: 0; font-size: 12px;
+  background: #fcf9e8; border: 1px solid #dba617; border-left-width: 4px; border-radius: 3px; color: #614200;
+}
+.sew-dnp-notice .dashicons { color: #dba617; font-size: 16px; width: 16px; height: 16px; margin-top: 1px; }
+
 /* the hidden attribute must beat the display:flex/grid rules above */
 .sew-dnp-wrap [hidden], .sew-dnp-modal[hidden] { display: none !important; }

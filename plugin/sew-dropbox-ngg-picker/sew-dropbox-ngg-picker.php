@@ -74,7 +74,7 @@ final class SEW_Dropbox_NGG_Picker {
         add_action('admin_post_sew_dnp_disconnect', array($this, 'handle_disconnect'));
         add_action('admin_post_sew_dnp_selftest', array($this, 'handle_selftest'));
 
-        foreach (array('status', 'folders', 'scan', 'thumbs', 'gallery_create', 'gallery_add', 'gallery_finish') as $action) {
+        foreach (array('status', 'folders', 'scan', 'thumbs', 'galleries', 'gallery_create', 'gallery_add', 'gallery_finish') as $action) {
             add_action('wp_ajax_sew_dnp_' . $action, array($this, 'ajax_' . $action));
         }
     }
@@ -345,8 +345,20 @@ final class SEW_Dropbox_NGG_Picker {
                     <h2>Selected <span class="sew-dnp-badge" id="sew-dnp-selected-count">0</span></h2>
                     <ol class="sew-dnp-selected" id="sew-dnp-selected"><li class="sew-dnp-muted">Nothing selected yet.</li></ol>
                     <div class="sew-dnp-panel-form">
-                        <label for="sew-dnp-gallery-name">Gallery name</label>
-                        <input type="text" id="sew-dnp-gallery-name" placeholder="e.g. Hot 8 Brass Band live - Conrad Sohm" autocomplete="off">
+                        <label for="sew-dnp-gallery-name">Gallery name <span class="sew-dnp-muted">(new, or type to find an existing one)</span></label>
+                        <div class="sew-dnp-combo">
+                            <input type="text" id="sew-dnp-gallery-name" placeholder="e.g. Hot 8 Brass Band live - Conrad Sohm" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="sew-dnp-gallery-suggest">
+                            <ul class="sew-dnp-suggest" id="sew-dnp-gallery-suggest" role="listbox" hidden></ul>
+                            <div class="sew-dnp-chip" id="sew-dnp-gallery-chip" hidden>
+                                <span class="dashicons dashicons-format-gallery"></span>
+                                <span class="sew-dnp-chip-label" id="sew-dnp-gallery-chip-label"></span>
+                                <button type="button" class="sew-dnp-chip-remove" id="sew-dnp-gallery-chip-remove" title="Create a new gallery instead" aria-label="Remove">&times;</button>
+                            </div>
+                        </div>
+                        <div class="sew-dnp-notice" id="sew-dnp-gallery-notice" hidden>
+                            <span class="dashicons dashicons-warning"></span>
+                            You will add pictures to an existing gallery, not create a new one.
+                        </div>
                         <div class="sew-dnp-muted sew-dnp-slug">Folder: <code id="sew-dnp-slug"><?php echo esc_html(SEW_DNP_NGG_Importer::gallery_basedir()); ?>/&hellip;</code></div>
                         <button type="button" class="button button-primary button-hero" id="sew-dnp-create" disabled>Create NGG gallery</button>
                     </div>
@@ -754,10 +766,51 @@ final class SEW_Dropbox_NGG_Picker {
         }
     }
 
-    /** Step 1: create the (empty) gallery folder. */
+    /** Existing NextGEN galleries matching a search string, for the name field's suggestions. */
+    public function ajax_galleries() {
+        $this->ajax_guard();
+        $q = trim((string) $this->post('q'));
+        try {
+            wp_send_json_success(array('galleries' => SEW_DNP_NGG_Importer::search_galleries($q, 12)));
+        } catch (Exception $exc) {
+            $this->ajax_fail($exc);
+        }
+    }
+
+    /** Step 1: create the (empty) gallery folder -- or open an existing gallery's folder. */
     public function ajax_gallery_create() {
         $this->ajax_guard();
         $name = trim((string) $this->post('name'));
+        $gallery_id = (int) $this->post('gallery_id', 0);
+        if ($gallery_id > 0) {
+            try {
+                $gallery = SEW_DNP_NGG_Importer::gallery_by_id($gallery_id);
+                if (!$gallery) {
+                    throw new SEW_DNP_NGG_Exception('NextGEN gallery ' . $gallery_id . ' does not exist (anymore).');
+                }
+                $slug = SEW_DNP_NGG_Importer::clean_folder(basename($gallery['path']));
+                $abspath = rtrim(ABSPATH, '/') . '/' . trim($gallery['path'], '/');
+                if (!is_dir($abspath) && !wp_mkdir_p($abspath)) {
+                    throw new SEW_DNP_NGG_Exception('Cannot create ' . $abspath);
+                }
+                if (!wp_is_writable($abspath)) {
+                    throw new SEW_DNP_NGG_Exception($abspath . ' is not writable.');
+                }
+                wp_send_json_success(array(
+                    'slug'        => $slug,
+                    'path'        => trim($gallery['path'], '/'),
+                    'existing'    => true,
+                    'gallery_id'  => $gallery_id,
+                    'title'       => $gallery['title'],
+                    'images'      => $gallery['images'],
+                    // Continue numbering after the files already there, so order stays chronological per import.
+                    'start_index' => count(SEW_DNP_NGG_Importer::disk_files($abspath)),
+                    'editor'      => SEW_DNP_Image_Processor::editor_class(),
+                ));
+            } catch (Exception $exc) {
+                $this->ajax_fail($exc, 400);
+            }
+        }
         if ($name === '') {
             wp_send_json_error(array('message' => 'Please enter a gallery name.'), 400);
         }
@@ -816,6 +869,10 @@ final class SEW_Dropbox_NGG_Picker {
             $stem = preg_replace('/[^A-Za-z0-9._-]+/', '-', $stem) ?: 'image';
             $filename = sprintf('%03d-%s.jpg', max(0, $index), $stem);
             $dest = $abspath . '/' . $filename;
+            for ($n = 2; file_exists($dest) && $n < 100; $n++) {
+                $filename = sprintf('%03d-%s-%d.jpg', max(0, $index), $stem, $n);
+                $dest = $abspath . '/' . $filename;
+            }
 
             $client = $this->client();
             if (!function_exists('wp_tempnam')) {

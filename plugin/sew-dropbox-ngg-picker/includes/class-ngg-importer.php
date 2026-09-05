@@ -106,6 +106,51 @@ class SEW_DNP_NGG_Importer {
         return null;
     }
 
+    /** Galleries whose title or folder name contains $q (newest first); all recent ones when $q is empty. */
+    public static function search_galleries($q, $limit = 12) {
+        global $wpdb;
+        $sql = "SELECT g.gid, g.title, g.name, g.path,
+                       (SELECT COUNT(*) FROM {$wpdb->prefix}ngg_pictures p WHERE p.galleryid = g.gid) AS images
+                  FROM {$wpdb->prefix}ngg_gallery g";
+        $params = array();
+        if ($q !== '') {
+            $like = '%' . $wpdb->esc_like($q) . '%';
+            $sql .= ' WHERE g.title LIKE %s OR g.name LIKE %s';
+            $params = array($like, $like);
+        }
+        $sql .= ' ORDER BY g.gid DESC LIMIT %d';
+        $params[] = (int) $limit;
+        $rows = $wpdb->get_results($wpdb->prepare($sql, $params), ARRAY_A);
+        $out = array();
+        foreach ((array) $rows as $row) {
+            $out[] = array(
+                'id'     => (int) $row['gid'],
+                'title'  => (string) $row['title'],
+                'name'   => (string) $row['name'],
+                'path'   => trim(str_replace('\\', '/', (string) $row['path']), '/'),
+                'images' => (int) $row['images'],
+            );
+        }
+        return $out;
+    }
+
+    public static function gallery_by_id($gallery_id) {
+        global $wpdb;
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT gid, title, name, path FROM {$wpdb->prefix}ngg_gallery WHERE gid = %d", (int) $gallery_id
+        ), ARRAY_A);
+        if (!$row) {
+            return null;
+        }
+        return array(
+            'id'     => (int) $row['gid'],
+            'title'  => (string) $row['title'],
+            'name'   => (string) $row['name'],
+            'path'   => trim(str_replace('\\', '/', (string) $row['path']), '/'),
+            'images' => self::count_images((int) $row['gid']),
+        );
+    }
+
     public static function count_images($gallery_id) {
         global $wpdb;
         return (int) $wpdb->get_var($wpdb->prepare(
@@ -175,11 +220,12 @@ class SEW_DNP_NGG_Importer {
         return true;
     }
 
-    public static function generate_thumbnails($gallery_id) {
+    /** Build thumbnails for the gallery's pictures; with $after_pid only for pictures added after it. */
+    public static function generate_thumbnails($gallery_id, $after_pid = 0) {
         global $wpdb;
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT pid, filename FROM {$wpdb->prefix}ngg_pictures WHERE galleryid = %d ORDER BY pid",
-            $gallery_id
+            "SELECT pid, filename FROM {$wpdb->prefix}ngg_pictures WHERE galleryid = %d AND pid > %d ORDER BY pid",
+            $gallery_id, (int) $after_pid
         ));
         $gallery = $wpdb->get_row($wpdb->prepare(
             "SELECT path FROM {$wpdb->prefix}ngg_gallery WHERE gid = %d", $gallery_id
@@ -343,8 +389,13 @@ class SEW_DNP_NGG_Importer {
             $notes[] = 'created gallery record';
         }
 
+        $existed = ($gallery !== null);
+        $registered_before = self::count_images($gallery_id);
+        $max_pid_before = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COALESCE(MAX(pid), 0) FROM {$wpdb->prefix}ngg_pictures WHERE galleryid = %d", $gallery_id
+        ));
         $notes[] = 'disk files: ' . count(self::disk_files($abspath));
-        $notes[] = 'registered before import: ' . self::count_images($gallery_id);
+        $notes[] = 'registered before import: ' . $registered_before;
 
         // import_gallery() has taken the bare folder name, an ABSPATH-relative
         // path and an absolute path across versions; try each until rows appear.
@@ -386,9 +437,13 @@ class SEW_DNP_NGG_Importer {
         if (!$imported && !$count) {
             throw new SEW_DNP_NGG_Exception('gallery ' . $gallery_id . ' has no registered images -- ' . implode(' / ', $notes));
         }
+        if ($existed && !$imported) {
+            throw new SEW_DNP_NGG_Exception('no new images were registered in gallery ' . $gallery_id . ' -- ' . implode(' / ', $notes));
+        }
 
-        // Make sure the title is the one the user typed (import_gallery may set its own).
-        if (class_exists('C_Gallery_Mapper')) {
+        // For a new gallery make sure the title is the one the user typed
+        // (import_gallery may set its own); an existing gallery keeps its title.
+        if (!$existed && class_exists('C_Gallery_Mapper')) {
             try {
                 $mapper = C_Gallery_Mapper::get_instance();
                 $entity = $mapper->find($gallery_id);
@@ -402,13 +457,16 @@ class SEW_DNP_NGG_Importer {
             }
         }
 
-        $thumbnails = self::generate_thumbnails($gallery_id);
+        // Existing gallery: only the pictures added now need thumbnails.
+        $thumbnails = self::generate_thumbnails($gallery_id, $existed ? $max_pid_before : 0);
 
         return array(
             'gallery_id' => $gallery_id,
+            'existing'   => $existed,
             'folder'     => $folder,
             'path'       => $relpath,
             'images'     => $count,
+            'added'      => $count - $registered_before,
             'thumbnails' => $thumbnails,
             'notes'      => $notes,
             'manage_url' => self::manage_url($gallery_id),

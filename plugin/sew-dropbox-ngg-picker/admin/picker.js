@@ -14,6 +14,8 @@
     selectAll: $('sew-dnp-select-all'), selectNone: $('sew-dnp-select-none'), grid: $('sew-dnp-grid'),
     selectedCount: $('sew-dnp-selected-count'), selected: $('sew-dnp-selected'),
     galleryName: $('sew-dnp-gallery-name'), slug: $('sew-dnp-slug'), create: $('sew-dnp-create'),
+    suggest: $('sew-dnp-gallery-suggest'), chip: $('sew-dnp-gallery-chip'), chipLabel: $('sew-dnp-gallery-chip-label'),
+    chipRemove: $('sew-dnp-gallery-chip-remove'), galleryNotice: $('sew-dnp-gallery-notice'),
     progress: $('sew-dnp-progress'), progressFill: $('sew-dnp-progress-fill'), progressText: $('sew-dnp-progress-text'),
     log: $('sew-dnp-log'), cancel: $('sew-dnp-cancel'), result: $('sew-dnp-result'),
     modal: $('sew-dnp-modal'), modalBody: $('sew-dnp-modal-body'), modalCancel: $('sew-dnp-modal-cancel'), modalOk: $('sew-dnp-modal-ok')
@@ -26,6 +28,7 @@
     selected: [],         // path_lower[] in grid order
     anchor: -1,           // index of last plain click, for shift ranges
     browsePath: '',
+    targetGallery: null,  // existing NGG gallery to add to, or null to create a new one
     importing: false,
     cancelRequested: false
   };
@@ -371,24 +374,103 @@
   });
 
   function updateCreateButton() {
-    var name = el.galleryName.value.trim();
-    var slug = slugify(name);
+    if (state.targetGallery) {
+      el.slug.textContent = state.targetGallery.path + ' (' + state.targetGallery.images + ' pictures now)';
+      el.create.textContent = 'Add to NGG gallery';
+      el.create.disabled = state.importing || !state.selected.length;
+      return;
+    }
+    var galleryName = el.galleryName.value.trim();
+    var slug = slugify(galleryName);
     el.slug.textContent = SEW_DNP.galleryBase + '/' + (slug || '…');
+    el.create.textContent = 'Create NGG gallery';
     el.create.disabled = state.importing || !state.selected.length || !slug;
   }
-  el.galleryName.addEventListener('input', updateCreateButton);
+
+  // -- existing-gallery suggestions (type to search NextGEN galleries) --------
+  var suggestTimer = null, suggestSeq = 0;
+  function hideSuggest() { el.suggest.hidden = true; el.suggest.innerHTML = ''; el.galleryName.setAttribute('aria-expanded', 'false'); }
+  function showSuggest(galleries, q) {
+    if (!galleries.length) { hideSuggest(); return; }
+    el.suggest.innerHTML = '<li class="sew-dnp-suggest-head">Existing galleries' + (q ? ' matching “' + escapeHtml(q) + '”' : '') + ' — click to add to one</li>' +
+      galleries.map(function (g) {
+        return '<li role="option"><button type="button" data-id="' + g.id + '">' +
+          '<span class="sew-dnp-suggest-title">' + escapeHtml(g.title || g.name) + '</span>' +
+          '<span class="sew-dnp-suggest-meta">' + escapeHtml(g.path) + ' · ' + g.images + ' pictures · id ' + g.id + '</span>' +
+          '</button></li>';
+      }).join('');
+    el.suggest.hidden = false;
+    el.galleryName.setAttribute('aria-expanded', 'true');
+    el.suggest._galleries = galleries;
+  }
+  function searchGalleries() {
+    var q = el.galleryName.value.trim();
+    var seq = ++suggestSeq;
+    ajax('galleries', { q: q }).then(function (data) {
+      if (seq !== suggestSeq || document.activeElement !== el.galleryName) { return; }
+      showSuggest(data.galleries || [], q);
+    }).catch(function () { hideSuggest(); });
+  }
+  function chooseGallery(g) {
+    state.targetGallery = g;
+    hideSuggest();
+    el.galleryName.hidden = true;
+    el.chipLabel.textContent = (g.title || g.name) + ' (' + g.images + ')';
+    el.chip.hidden = false;
+    el.galleryNotice.hidden = false;
+    updateCreateButton();
+  }
+  function clearGallery(focus) {
+    state.targetGallery = null;
+    el.chip.hidden = true;
+    el.galleryNotice.hidden = true;
+    el.galleryName.hidden = false;
+    updateCreateButton();
+    if (focus) { el.galleryName.focus(); }
+  }
+  el.galleryName.addEventListener('input', function () {
+    updateCreateButton();
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(searchGalleries, 250);
+  });
+  el.galleryName.addEventListener('focus', function () { clearTimeout(suggestTimer); suggestTimer = setTimeout(searchGalleries, 150); });
+  el.galleryName.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { hideSuggest(); }
+    if (e.key === 'ArrowDown' && !el.suggest.hidden) { var first = el.suggest.querySelector('button'); if (first) { e.preventDefault(); first.focus(); } }
+  });
+  el.suggest.addEventListener('keydown', function (e) {
+    var buttons = Array.prototype.slice.call(el.suggest.querySelectorAll('button'));
+    var i = buttons.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' && i < buttons.length - 1) { e.preventDefault(); buttons[i + 1].focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); if (i > 0) { buttons[i - 1].focus(); } else { el.galleryName.focus(); } }
+    if (e.key === 'Escape') { hideSuggest(); el.galleryName.focus(); }
+  });
+  el.suggest.addEventListener('click', function (e) {
+    var button = e.target.closest('button[data-id]');
+    if (!button || state.importing) { return; }
+    var id = parseInt(button.dataset.id, 10);
+    var g = (el.suggest._galleries || []).filter(function (x) { return x.id === id; })[0];
+    if (g) { chooseGallery(g); }
+  });
+  el.chipRemove.addEventListener('click', function () { if (!state.importing) { clearGallery(true); } });
+  document.addEventListener('click', function (e) {
+    if (!el.suggest.hidden && !el.suggest.contains(e.target) && e.target !== el.galleryName) { hideSuggest(); }
+  });
 
   // ------------------------------------------------------------ confirm + import
   el.create.addEventListener('click', function () {
     var items = orderedSelection();
-    var name = el.galleryName.value.trim();
+    var target = state.targetGallery;
+    var galleryName = target ? (target.title || target.name) : el.galleryName.value.trim();
     var totalBytes = items.reduce(function (sum, p) { return sum + state.byPath[p].size; }, 0);
-    el.modalBody.innerHTML = '<dl>' +
-      '<dt>Gallery</dt><dd><strong>' + escapeHtml(name) + '</strong></dd>' +
-      '<dt>Folder</dt><dd><code>' + escapeHtml(SEW_DNP.galleryBase + '/' + slugify(name)) + '</code></dd>' +
+    $('sew-dnp-modal-title').textContent = target ? 'Add to this existing gallery?' : 'Create this gallery?';
+    el.modalOk.textContent = target ? 'Yes, add pictures' : 'Yes, create gallery';
+    el.modalBody.innerHTML = (target ? '<p class="sew-dnp-notice"><span class="dashicons dashicons-warning"></span> You will add pictures to an existing gallery, not create a new one.</p>' : '') + '<dl>' +
+      '<dt>Gallery</dt><dd><strong>' + escapeHtml(galleryName) + '</strong>' + (target ? ' (id ' + target.id + ', ' + target.images + ' pictures now)' : '') + '</dd>' +
+      '<dt>Folder</dt><dd><code>' + escapeHtml(target ? target.path : SEW_DNP.galleryBase + '/' + slugify(galleryName)) + '</code></dd>' +
       '<dt>Pictures</dt><dd>' + items.length + ' (' + formatBytes(totalBytes) + ' in Dropbox)</dd>' +
       '<dt>Processing</dt><dd>download, resize to max ' + SEW_DNP.maxDim + ' px and ' + SEW_DNP.maxKb + ' KB, register in NextGEN, build thumbnails</dd>' +
-      '</dl><p>This writes files to the server and creates a NextGEN gallery. Continue?</p>';
+      '</dl><p>This writes files to the server and ' + (target ? 'extends the NextGEN gallery' : 'creates a NextGEN gallery') + '. Continue?</p>';
     el.modal.hidden = false;
     el.modalOk.focus();
   });
@@ -425,19 +507,21 @@
 
   function runImport() {
     var items = orderedSelection();
-    var name = el.galleryName.value.trim();
+    var target = state.targetGallery;
+    var name = target ? (target.title || target.name) : el.galleryName.value.trim();
     if (!items.length || !name) { return; }
     state.importing = true; state.cancelRequested = false;
-    el.create.disabled = true; el.load.disabled = true; el.galleryName.disabled = true;
+    el.create.disabled = true; el.load.disabled = true; el.galleryName.disabled = true; el.chipRemove.disabled = true;
     el.progress.hidden = false; el.cancel.hidden = false; el.cancel.disabled = false; el.result.hidden = true;
     el.log.innerHTML = '';
-    var total = items.length + 2, done = 0, failures = [], slug = null, sizeBefore = 0, sizeAfter = 0;
-    setProgress(0, total, 'Creating gallery folder…');
+    var total = items.length + 2, done = 0, failures = [], slug = null, sizeBefore = 0, sizeAfter = 0, startIndex = 0;
+    setProgress(0, total, target ? 'Opening gallery folder…' : 'Creating gallery folder…');
 
-    ajax('gallery_create', { name: name }).then(function (data) {
+    ajax('gallery_create', target ? { gallery_id: target.id } : { name: name }).then(function (data) {
       slug = data.slug;
+      startIndex = data.start_index || 0;
       done++;
-      log('Folder ' + data.path + ' created (image editor: ' + (data.editor || '?') + ').', 'ok');
+      log((data.existing ? 'Adding to existing gallery "' + data.title + '" (id ' + data.gallery_id + ', ' + data.images + ' pictures) in ' + data.path : 'Folder ' + data.path + ' created') + ' (image editor: ' + (data.editor || '?') + ').', 'ok');
       setProgress(done, total, 'Downloading and resizing 1/' + items.length + '…');
 
       var cursor = 0, active = 0, concurrency = 2;
@@ -450,7 +534,7 @@
               var file = state.byPath[path];
               active++;
               setRowState(path, 'working', 'processing');
-              ajax('gallery_add', { slug: slug, path: file.path_display, name: file.name, index: index + 1, width: file.width, height: file.height }).then(function (meta) {
+              ajax('gallery_add', { slug: slug, path: file.path_display, name: file.name, index: startIndex + index + 1, width: file.width, height: file.height }).then(function (meta) {
                 sizeBefore += file.size; sizeAfter += meta.bytes;
                 setRowState(path, 'done', meta.width + '×' + meta.height + ', ' + formatBytes(meta.bytes));
                 log((index + 1) + '/' + items.length + ' ' + file.name + ' → ' + meta.file + ' ' + meta.width + 'x' + meta.height + ' ' + formatBytes(meta.bytes) + ' q' + meta.quality + (meta.source !== 'original' ? ' (via ' + meta.source + ')' : '') + (meta.over_budget ? ' OVER 500 KB' : ''));
@@ -483,11 +567,11 @@
     }).then(function (result) {
       done++;
       setProgress(total, total, 'Done.');
-      log('NextGEN gallery #' + result.gallery_id + ' with ' + result.images + ' image(s); thumbnails: ' + result.thumbnails.generated + '/' + result.thumbnails.total + ' (' + result.thumbnails.size + ').', 'ok');
+      log('NextGEN gallery #' + result.gallery_id + (result.existing ? ': ' + result.added + ' added, now ' : ' with ') + result.images + ' image(s); thumbnails: ' + result.thumbnails.generated + '/' + result.thumbnails.total + ' (' + result.thumbnails.size + ').', 'ok');
       if (result.thumbnails.failed && result.thumbnails.failed.length) { log('Thumbnail problems: ' + result.thumbnails.failed.join('; '), 'error'); }
       el.result.hidden = false;
       el.result.dataset.kind = failures.length ? 'error' : 'ok';
-      el.result.innerHTML = '<strong>Gallery created:</strong> ' + escapeHtml(name) + ' (id ' + result.gallery_id + ', ' + result.images + ' images, ' + formatBytes(sizeBefore) + ' → ' + formatBytes(sizeAfter) + ')' +
+      el.result.innerHTML = '<strong>' + (result.existing ? 'Pictures added to gallery:' : 'Gallery created:') + '</strong> ' + escapeHtml(name) + ' (id ' + result.gallery_id + ', ' + (result.existing ? result.added + ' added, now ' : '') + result.images + ' images, ' + formatBytes(sizeBefore) + ' → ' + formatBytes(sizeAfter) + ')' +
         (failures.length ? '<br><strong style="color:#d63638">' + failures.length + ' image(s) failed</strong> -- see the log.' : '') +
         '<br><a class="button button-primary" style="margin-top:8px" href="' + escapeHtml(result.manage_url) + '" target="_blank" rel="noopener">Open in NextGEN</a>' +
         '<code>' + escapeHtml(result.shortcode) + '</code>';
@@ -500,6 +584,8 @@
       state.importing = false;
       el.cancel.hidden = true;
       el.galleryName.disabled = false;
+      el.chipRemove.disabled = false;
+      if (target) { target.images += Math.max(0, done - 1 - failures.length); el.chipLabel.textContent = (target.title || target.name) + ' (' + target.images + ')'; }
       validate();
       updateCreateButton();
     });
